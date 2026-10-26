@@ -12,6 +12,9 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange.svg?style=flat-square)](https://www.rust-lang.org)
 
+</div>
+
+
 # Fonctionnalités principales
 
 - **Découverte automatique sur le réseau local** : chaque instance diffuse une annonce toutes les 5 secondes sur le réseau, avec support du broadcast global et du broadcast dirigé par interface (compatible Wi-Fi domestique, hotspot, LAN).
