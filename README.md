@@ -34,7 +34,7 @@
 - **Messages non chiffrés** : les messages circulent en clair sur le réseau local. Joinus est pensé pour un réseau de confiance (Wi-Fi domestique, hotspot personnel), pas pour un réseau public. Cette limite est volontaire et documentée dans l'interface.
 - **Données locales** : toutes les données (profil, avatar, historique) restent sur votre machine, dans `%APPDATA%\Joinus\`. La désinstallation propose de les conserver ou de les supprimer.
 
----
+```
 Joinus/
 │
 ├── images/                 # Ressources graphiques (logo, icônes, boutons)
@@ -62,7 +62,7 @@ Joinus/
 ├── README.md               # Documentation du projet
 └── rust-toolchain.toml     # Configuration de la chaîne d'outils Rust
 
----
+```
 
 ## Environnement
 
@@ -80,6 +80,7 @@ Session et avatar dans %APPDATA%\Joinus\ :
 - session.json : nom, langue, thème
 - avatar.dat : photo de profil
 
+```
 ## 👤 Auteur
 
  * **Johanes-mg** 
@@ -87,3 +88,5 @@ Session et avatar dans %APPDATA%\Joinus\ :
  
 ## 📄 Licence
 Ce projet est sous licence ouverte. Voir le fichier LICENSE pour plus de détails.
+
+```
