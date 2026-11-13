@@ -1,5 +1,5 @@
 [target.x86_64-pc-windows-gnullvm]
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-self-contained=yes"]
 
 [build]
 target = "x86_64-pc-windows-gnullvm"

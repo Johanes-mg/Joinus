@@ -1,8 +1,8 @@
 [Setup]
 AppId={{8E3B2A41-6D57-4C8F-9A2E-4F1B7D9C6E30}
 AppName=Joinus
-AppVersion=0.4.0
-AppVerName=Joinus 0.4.0
+AppVersion=3.4.1
+AppVerName=Joinus 3.4.1
 AppPublisher=Johanes-mg
 AppPublisherURL=https://johanes-mg.github.io
 AppSupportURL=https://johanes-mg.github.io
@@ -26,11 +26,11 @@ DisableReadyPage=no
 UsePreviousAppDir=yes
 AllowUNCPath=no
 ChangesEnvironment=no
-VersionInfoVersion=0.4.0
+VersionInfoVersion=3.4.1
 VersionInfoCompany=Johanes-mg
-VersionInfoDescription=Joinus 0.4.0 - Installation
+VersionInfoDescription=Joinus 3.4.1 - Installation
 VersionInfoProductName=Joinus
-VersionInfoProductVersion=0.4.0
+VersionInfoProductVersion=3.4.1
 
 [Languages]
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"
@@ -102,9 +102,8 @@ begin
       Reponse := MsgBox(
         'Voulez-vous également supprimer vos données Joinus ?' + #13#10 + #13#10 +
         'Dossier : ' + DossierDonnees + #13#10 + #13#10 +
-        'Si vous répondez Non, vos données (profil, avatar, session) seront conservées.',
+        'Si vous répondez Non, vos données (profil, avatar, session, historique) seront conservées.',
         mbConfirmation, MB_YESNO);
-
       if Reponse = IDYES then
       begin
         DelTree(DossierDonnees, True, True, True);

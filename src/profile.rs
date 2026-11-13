@@ -72,7 +72,11 @@ impl Profil {
         }
     }
 
-    pub fn texture(&self, ctx: &egui::Context, cache: &mut CacheTextures) -> Option<egui::TextureHandle> {
+    pub fn texture(
+        &self,
+        ctx: &egui::Context,
+        cache: &mut CacheTextures,
+    ) -> Option<egui::TextureHandle> {
         let bytes = self.avatar_bytes.as_ref()?;
         cache.obtenir_avec_hash(ctx, bytes, self.avatar_hash, "avatar")
     }

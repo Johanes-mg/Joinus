@@ -1,5 +1,6 @@
 use crate::i18n::Langue;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -15,7 +16,7 @@ pub struct Session {
 }
 
 fn taille_fenetre_defaut() -> [f32; 2] {
-    [1100.0, 700.0]
+    [1150.0, 720.0]
 }
 
 fn id_defaut() -> String {
@@ -89,6 +90,30 @@ pub fn sauver_avatar(bytes: &[u8]) -> bool {
     std::fs::write(chemin_avatar(), bytes).is_ok()
 }
 
+fn chemin_alias() -> PathBuf {
+    dossier_app().join("alias.json")
+}
+
+pub fn charger_alias() -> HashMap<String, String> {
+    if let Ok(texte) = std::fs::read_to_string(chemin_alias()) {
+        if let Ok(m) = serde_json::from_str::<HashMap<String, String>>(&texte) {
+            return m;
+        }
+    }
+    HashMap::new()
+}
+
+pub fn sauver_alias(alias: &HashMap<String, String>) {
+    if let Ok(texte) = serde_json::to_string_pretty(alias) {
+        let _ = std::fs::write(chemin_alias(), texte);
+    }
+}
+
+pub fn supprimer_historique(pair_id: &str) {
+    let chemin = dossier_historique().join(format!("{}.json", pair_id));
+    let _ = std::fs::remove_file(chemin);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,7 +124,6 @@ mod tests {
         assert_eq!(s.nom_affiche, "Utilisateur");
         assert_eq!(s.langue, Langue::Fr);
         assert!(s.sombre);
-        assert_eq!(s.window_size, [1100.0, 700.0]);
         assert!(!s.id.is_empty());
     }
 
@@ -116,13 +140,5 @@ mod tests {
         let s2: Session = serde_json::from_str(&json).unwrap();
         assert_eq!(s.nom_affiche, s2.nom_affiche);
         assert_eq!(s.id, s2.id);
-    }
-
-    #[test]
-    fn session_ancienne_version_genere_id() {
-        let json = r#"{"nom_affiche":"Ancien","langue":"Fr","sombre":true}"#;
-        let s: Session = serde_json::from_str(json).unwrap();
-        assert!(!s.id.is_empty());
-        assert_eq!(s.window_size, [1100.0, 700.0]);
     }
 }

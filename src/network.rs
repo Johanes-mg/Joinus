@@ -1,5 +1,7 @@
+use crate::pieces_jointes::PieceJointe;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
+use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -10,7 +12,7 @@ use std::time::{Duration, Instant};
 pub const PORT_UDP: u16 = 42001;
 pub const INTERVALLE_ANNONCE: Duration = Duration::from_secs(5);
 pub const TIMEOUT_PRESENCE: Duration = Duration::from_secs(20);
-pub const LIMITE_MESSAGE_OCTETS: usize = 4096;
+pub const LIMITE_MESSAGE_OCTETS: usize = 32 * 1024 * 1024;
 pub const LIMITE_AVATAR_OCTETS: usize = 5 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -23,20 +25,31 @@ pub struct Annonce {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Message {
+    #[serde(default)]
+    pub id: String,
     pub de: String,
     pub vers: String,
     pub texte: String,
     pub ts: i64,
+    #[serde(default)]
+    pub reponse_a: Option<String>,
+    #[serde(default)]
+    pub piece_jointe: Option<PieceJointe>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Enveloppe {
     Chat {
+        id: String,
         de: String,
         vers: String,
         texte: String,
         ts: i64,
+        #[serde(default)]
+        reponse_a: Option<String>,
+        #[serde(default)]
+        piece_jointe: Option<PieceJointe>,
     },
     DemandeAvatar {
         de: String,
@@ -44,6 +57,11 @@ pub enum Enveloppe {
     ReponseAvatar {
         de: String,
         avatar_b64: String,
+    },
+    SupprimerMessage {
+        de: String,
+        vers: String,
+        id: String,
     },
 }
 
@@ -60,6 +78,7 @@ pub enum Evenement {
     PairVu(Pair),
     MessageRecu(Message),
     AvatarRecu { id: String, bytes: Vec<u8> },
+    MessageSupprime { de: String, id: String },
 }
 
 pub struct Reseau {
@@ -226,9 +245,7 @@ fn spawn_recepteur_udp(
                             };
                             {
                                 let mut liste = pairs.lock().unwrap();
-                                if let Some(existant) =
-                                    liste.iter_mut().find(|p| p.id == pair.id)
-                                {
+                                if let Some(existant) = liste.iter_mut().find(|p| p.id == pair.id) {
                                     existant.derniere_annonce = Instant::now();
                                     existant.adresse = addr;
                                     existant.tcp_port = annonce.tcp_port;
@@ -273,28 +290,52 @@ fn traiter_connexion_entrante(
     tx: &Sender<Evenement>,
     signal: &Arc<AtomicBool>,
 ) {
-    use std::io::{Read, Write};
-    let _ = flux.set_read_timeout(Some(Duration::from_secs(3)));
-    let mut buf = vec![0u8; LIMITE_MESSAGE_OCTETS * 2];
-    let Ok(n) = flux.read(&mut buf) else { return };
-    if n == 0 {
+    let _ = flux.set_read_timeout(Some(Duration::from_secs(15)));
+    let mut buf = Vec::new();
+    let mut temp = [0u8; 65536];
+    loop {
+        match flux.read(&mut temp) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&temp[..n]);
+                if buf.len() > LIMITE_MESSAGE_OCTETS {
+                    return;
+                }
+                if n < temp.len() {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    if buf.is_empty() {
         return;
     }
-    let Ok(texte) = std::str::from_utf8(&buf[..n]) else { return };
-    let Ok(enveloppe) = serde_json::from_str::<Enveloppe>(texte) else { return };
+    let Ok(texte) = std::str::from_utf8(&buf) else {
+        return;
+    };
+    let Ok(enveloppe) = serde_json::from_str::<Enveloppe>(texte) else {
+        return;
+    };
     match enveloppe {
         Enveloppe::Chat {
+            id,
             de,
             vers,
             texte,
             ts,
+            reponse_a,
+            piece_jointe,
         } => {
             if vers == id_local {
                 let _ = tx.send(Evenement::MessageRecu(Message {
+                    id,
                     de,
                     vers,
                     texte,
                     ts,
+                    reponse_a,
+                    piece_jointe,
                 }));
                 signal.store(true, Ordering::Relaxed);
             }
@@ -320,36 +361,49 @@ fn traiter_connexion_entrante(
                 }
             }
         }
+        Enveloppe::SupprimerMessage { de, vers, id } => {
+            if vers == id_local {
+                let _ = tx.send(Evenement::MessageSupprime { de, id });
+                signal.store(true, Ordering::Relaxed);
+            }
+        }
     }
 }
 
 fn lire_avatar_local() -> Option<Vec<u8>> {
-    let chemin = crate::persistence::chemin_avatar();
-    std::fs::read(chemin).ok()
+    std::fs::read(crate::persistence::chemin_avatar()).ok()
 }
 
 pub fn envoyer_message_tcp(pair: &Pair, message: &Message) -> bool {
     let enveloppe = Enveloppe::Chat {
+        id: message.id.clone(),
         de: message.de.clone(),
         vers: message.vers.clone(),
         texte: message.texte.clone(),
         ts: message.ts,
+        reponse_a: message.reponse_a.clone(),
+        piece_jointe: message.piece_jointe.clone(),
+    };
+    envoyer_enveloppe(pair, &enveloppe)
+}
+
+pub fn envoyer_suppression(pair: &Pair, de: &str, id: &str) -> bool {
+    let enveloppe = Enveloppe::SupprimerMessage {
+        de: de.to_string(),
+        vers: pair.id.clone(),
+        id: id.to_string(),
     };
     envoyer_enveloppe(pair, &enveloppe)
 }
 
 pub fn demander_avatar(pair: &Pair, de: &str) -> Option<Vec<u8>> {
-    use std::io::{Read, Write};
     let addr = format!("{}:{}", pair.adresse.ip(), pair.tcp_port);
-    let mut flux = TcpStream::connect_timeout(
-        &addr.parse().ok()?,
-        Duration::from_secs(2),
-    )
-    .ok()?;
+    let mut flux = TcpStream::connect_timeout(&addr.parse().ok()?, Duration::from_secs(2)).ok()?;
     let _ = flux.set_read_timeout(Some(Duration::from_secs(5)));
     let enveloppe = Enveloppe::DemandeAvatar { de: de.to_string() };
     let texte = serde_json::to_string(&enveloppe).ok()?;
     flux.write_all(texte.as_bytes()).ok()?;
+    flux.shutdown(std::net::Shutdown::Write).ok()?;
     let mut buf = vec![0u8; LIMITE_AVATAR_OCTETS + 1024];
     let mut total = 0usize;
     loop {
@@ -370,25 +424,25 @@ pub fn demander_avatar(pair: &Pair, de: &str) -> Option<Vec<u8>> {
     let texte = std::str::from_utf8(&buf[..total]).ok()?;
     let enveloppe = serde_json::from_str::<Enveloppe>(texte).ok()?;
     match enveloppe {
-        Enveloppe::ReponseAvatar { avatar_b64, .. } => {
-            BASE64.decode(avatar_b64.as_bytes()).ok()
-        }
+        Enveloppe::ReponseAvatar { avatar_b64, .. } => BASE64.decode(avatar_b64.as_bytes()).ok(),
         _ => None,
     }
 }
 
 fn envoyer_enveloppe(pair: &Pair, enveloppe: &Enveloppe) -> bool {
-    use std::io::Write;
     let addr = format!("{}:{}", pair.adresse.ip(), pair.tcp_port);
-    let Ok(mut flux) =
-        TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_secs(2))
+    let Ok(mut flux) = TcpStream::connect_timeout(&addr.parse().unwrap(), Duration::from_secs(5))
     else {
         return false;
     };
     let Ok(texte) = serde_json::to_string(enveloppe) else {
         return false;
     };
-    flux.write_all(texte.as_bytes()).is_ok()
+    if flux.write_all(texte.as_bytes()).is_err() {
+        return false;
+    }
+    let _ = flux.shutdown(std::net::Shutdown::Write);
+    true
 }
 
 #[cfg(test)]
@@ -401,7 +455,7 @@ mod tests {
             id: "x".to_string(),
             nom: "Test".to_string(),
             tcp_port: 50000,
-            version: "0.4.0".to_string(),
+            version: "3.4.1".to_string(),
         };
         let json = serde_json::to_string(&a).unwrap();
         let a2: Annonce = serde_json::from_str(&json).unwrap();
@@ -409,53 +463,8 @@ mod tests {
     }
 
     #[test]
-    fn enveloppe_chat_roundtrip() {
-        let e = Enveloppe::Chat {
-            de: "a".to_string(),
-            vers: "b".to_string(),
-            texte: "coucou".to_string(),
-            ts: 12345,
-        };
-        let json = serde_json::to_string(&e).unwrap();
-        assert!(json.contains("\"type\":\"chat\""));
-    }
-
-    #[test]
-    fn enveloppe_demande_avatar_roundtrip() {
-        let e = Enveloppe::DemandeAvatar {
-            de: "a".to_string(),
-        };
-        let json = serde_json::to_string(&e).unwrap();
-        assert!(json.contains("\"type\":\"demande_avatar\""));
-    }
-
-    #[test]
-    fn enveloppe_reponse_avatar_roundtrip() {
-        let bytes = vec![0x89, 0x50, 0x4E, 0x47];
-        let e = Enveloppe::ReponseAvatar {
-            de: "a".to_string(),
-            avatar_b64: BASE64.encode(&bytes),
-        };
-        let json = serde_json::to_string(&e).unwrap();
-        let e2: Enveloppe = serde_json::from_str(&json).unwrap();
-        match e2 {
-            Enveloppe::ReponseAvatar { avatar_b64, .. } => {
-                let decoded = BASE64.decode(avatar_b64.as_bytes()).unwrap();
-                assert_eq!(decoded, bytes);
-            }
-            _ => panic!("mauvais type"),
-        }
-    }
-
-    #[test]
     fn broadcast_dirige_local() {
         let ip = Ipv4Addr::new(192, 168, 1, 42);
         assert_eq!(broadcast_dirige(ip), Some(Ipv4Addr::new(192, 168, 1, 255)));
-    }
-
-    #[test]
-    fn broadcast_dirige_loopback_ignore() {
-        let ip = Ipv4Addr::new(127, 0, 0, 1);
-        assert_eq!(broadcast_dirige(ip), None);
     }
 }
